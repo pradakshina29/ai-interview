@@ -1,0 +1,35 @@
+# ── Dependencies ──────────────────────────────────────────────────────────────
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# ── Environment Variables (SECRET — NEVER COMMIT THESE) ───────────────────────
+.env
+client/.env
+server/.env
+
+# ── Build Output ──────────────────────────────────────────────────────────────
+client/build/
+dist/
+
+# ── Firebase Service Account Key (VERY SECRET) ────────────────────────────────
+*serviceAccountKey*.json
+*firebase-adminsdk*.json
+*.json.key
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# ── OS Files ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Editor ────────────────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+
+# ── Coverage ──────────────────────────────────────────────────────────────────
+coverage/
