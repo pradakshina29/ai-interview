@@ -41,12 +41,14 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
-  message: { error: 'Too many requests, please try again later.' },
-});
-app.use('/api/', apiLimiter);
+if (process.env.NODE_ENV === 'production') {
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 1000, // Increased to 1000 to prevent locking out active users
+    message: { error: 'Too many requests, please try again later.' },
+  });
+  app.use('/api/', apiLimiter);
+}
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api/interview', require('./routes/interview'));
