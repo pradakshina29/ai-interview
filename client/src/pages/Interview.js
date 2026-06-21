@@ -152,6 +152,7 @@ export default function Interview() {
     return () => {
       if (faceLoopRef.current) cancelAnimationFrame(faceLoopRef.current);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, mediaRequested, isCamOn]);
 
   // Camera & Mic Setup
