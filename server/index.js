@@ -11,13 +11,11 @@ if (!admin.apps.length) {
   if (privateKey) {
     privateKey = privateKey.trim();
     // Strip leading/trailing double or single quotes if present
-    if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
-      privateKey = privateKey.slice(1, -1);
-    } else if (privateKey.startsWith("'") && privateKey.endsWith("'")) {
-      privateKey = privateKey.slice(1, -1);
-    }
+    privateKey = privateKey.replace(/^["']|["']$/g, '');
     // Replace literal '\n' character sequences with actual newlines
     privateKey = privateKey.replace(/\\n/g, '\n');
+    // Remove carriage returns to avoid parsing issues
+    privateKey = privateKey.replace(/\r/g, '');
   }
 
   admin.initializeApp({
@@ -92,7 +90,11 @@ app.use((err, req, res, next) => {
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\n🚀  Server running on http://localhost:${PORT}`);
-  console.log(`🤖  AI Interview Practice System ready!\n`);
-});
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`\n🚀  Server running on http://localhost:${PORT}`);
+    console.log(`🤖  AI Interview Practice System ready!\n`);
+  });
+}
+
+module.exports = app;
