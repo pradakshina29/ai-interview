@@ -7,11 +7,24 @@ const admin = require('firebase-admin');
 
 // ─── Firebase Admin Initialization ───────────────────────────────────────────
 if (!admin.apps.length) {
+  let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+  if (privateKey) {
+    privateKey = privateKey.trim();
+    // Strip leading/trailing double or single quotes if present
+    if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+      privateKey = privateKey.slice(1, -1);
+    } else if (privateKey.startsWith("'") && privateKey.endsWith("'")) {
+      privateKey = privateKey.slice(1, -1);
+    }
+    // Replace literal '\n' character sequences with actual newlines
+    privateKey = privateKey.replace(/\\n/g, '\n');
+  }
+
   admin.initializeApp({
     credential: admin.credential.cert({
       projectId: process.env.FIREBASE_PROJECT_ID,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      privateKey: privateKey,
     }),
   });
 }
