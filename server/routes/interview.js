@@ -4,17 +4,76 @@ const multer = require('multer');
 const admin = require('firebase-admin');
 const { verifyToken } = require('../middleware/auth');
 const { v4: uuidv4 } = require('uuid');
+const { getDb } = require('../db');
 
 const { generateJSON, evaluateAnswer } = require('../services/gemini.service');
 const { parsePDF, extractResumeData } = require('../services/resume.service');
 const { getTechnicalQuestionPrompt, getBehaviouralQuestionPrompt } = require('../config/gemini.config');
 
-const db = admin.firestore();
+function mapQuestionsFromJSON(qJsonArray, mode) {
+  return qJsonArray.map((qJson, i) => ({
+    id: i + 1,
+    question: qJson.question || 'Describe your experience in this role.',
+    type: mode,
+    topic: qJson.topic || qJson.whatWeTest || 'General',
+    expectedPoints: Array.isArray(qJson.expectedPoints)
+      ? qJson.expectedPoints
+      : [qJson.hint || qJson.framework || 'Use STAR method'],
+    expectedDuration: qJson.expectedDuration || '5 mins',
+  }));
+}
+
+function getStaticFallbackQuestions(role, difficulty, numQuestions, mode) {
+  return Array.from({ length: numQuestions }, (_, i) => {
+    const isTechnical = mode === 'technical' ? i % 2 === 0 : false;
+    return {
+      id: i + 1,
+      question: isTechnical
+        ? `Can you describe the architecture of a project you've worked on, and how you ensured scalability as a ${role}?`
+        : mode === 'behavioural'
+          ? `Tell me about a time when you had a conflict with a team member or stakeholder. How did you resolve it?`
+          : `Can you explain a challenging project you worked on as a ${role}?`,
+      type: isTechnical ? 'technical' : mode,
+      topic: isTechnical ? 'System Design' : mode === 'behavioural' ? 'Teamwork' : 'Experience',
+      expectedPoints: isTechnical
+        ? ['Database choices', 'API design', 'Scaling strategies']
+        : ['Situation', 'Task', 'Action', 'Result'],
+      expectedDuration: '5 mins',
+    };
+  });
+}
+
+async function generateInterviewQuestions({ role, difficulty, numQuestions, mode, resumeJSON }) {
+  let promptText;
+  if (resumeJSON) {
+    if (mode === 'behavioural') {
+      const summary = resumeJSON.summary || resumeJSON.currentRole || 'Candidate';
+      promptText = getBehaviouralQuestionPrompt(summary, 'Tech Company', numQuestions);
+    } else {
+      promptText = getTechnicalQuestionPrompt(resumeJSON, role, difficulty, numQuestions);
+    }
+  } else {
+    promptText = `You are an expert interviewer. Generate ${numQuestions} distinct ${mode} interview questions for a ${difficulty} level ${role} position.
+Return ONLY a valid JSON array:
+[{"question":"...","topic":"...","expectedDuration":"5 mins","hint":"..."}]`;
+  }
+
+  try {
+    const qJsonArray = await generateJSON(promptText);
+    if (Array.isArray(qJsonArray) && qJsonArray.length > 0) {
+      return mapQuestionsFromJSON(qJsonArray.slice(0, numQuestions), mode);
+    }
+    throw new Error('Generation did not return a question array');
+  } catch (err) {
+    console.error('Question generation failed, using static fallback:', err.message);
+    return getStaticFallbackQuestions(role, difficulty, numQuestions, mode);
+  }
+}
 
 // Set up multer for PDF upload (store in memory)
 const upload = multer({ 
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 4 * 1024 * 1024 }, // 4MB (Vercel request limit is ~4.5MB)
   fileFilter: (req, file, cb) => {
     if (file.mimetype === 'application/pdf') cb(null, true);
     else cb(new Error('Only PDFs are allowed'));
@@ -22,7 +81,14 @@ const upload = multer({
 });
 
 // ─── POST /api/interview/upload-resume ───────────────────────────────────────
-router.post('/upload-resume', verifyToken, upload.single('resume'), async (req, res) => {
+router.post('/upload-resume', verifyToken, (req, res, next) => {
+  upload.single('resume')(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || 'Invalid file upload.' });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No resume file provided.' });
     
@@ -46,75 +112,13 @@ router.post('/start', verifyToken, async (req, res) => {
     }
 
     const sessionId = uuidv4();
-    const questions = [];
-
-    if (resumeJSON) {
-      // Generate all questions in a single API call to prevent rate limits and be super fast
-      let promptText = '';
-      if (mode === 'behavioural') {
-        const summary = resumeJSON.summary || resumeJSON.currentRole || 'Candidate';
-        promptText = getBehaviouralQuestionPrompt(summary, 'Tech Company', numQuestions);
-      } else {
-        promptText = getTechnicalQuestionPrompt(resumeJSON, role, difficulty, numQuestions);
-      }
-
-      try {
-        const qJsonArray = await generateJSON(promptText);
-        
-        if (Array.isArray(qJsonArray)) {
-          qJsonArray.forEach((qJson, i) => {
-            questions.push({
-              id: i + 1,
-              question: qJson.question || 'Describe your experience with ' + role,
-              type: mode,
-              topic: qJson.topic || qJson.whatWeTest || 'General',
-              expectedPoints: [qJson.hint || qJson.framework || 'Use STAR method'],
-              expectedDuration: qJson.expectedDuration || '5 mins'
-            });
-          });
-        } else {
-          throw new Error('Generation did not return an array');
-        }
-      } catch (err) {
-        console.error('Error generating questions:', err.message);
-        // Fallback to a single generic question if generation fails entirely
-        for (let i = 0; i < numQuestions; i++) {
-          questions.push({
-            id: i + 1,
-            question: `Can you explain a challenging project you worked on as a ${role}?`,
-            type: mode,
-            topic: 'Experience',
-            expectedPoints: ['Situation', 'Task', 'Action', 'Result'],
-            expectedDuration: '5 mins'
-          });
-        }
-      }
-      try {
-        const fallbackQs = await generateJSON(fallbackPrompt);
-        if (Array.isArray(fallbackQs)) {
-          questions.push(...fallbackQs);
-        } else {
-          throw new Error('Fallback generation did not return an array');
-        }
-      } catch (err) {
-        console.error('Fallback generation failed, using static fallback questions:', err.message);
-        for (let i = 0; i < numQuestions; i++) {
-          const type = i % 2 === 0 ? 'technical' : 'behavioral';
-          questions.push({
-            id: i + 1,
-            question: type === 'technical' 
-              ? `Can you describe the architecture of a project you've worked on, and how you ensured scalability as a ${role}?`
-              : `Tell me about a time when you had a conflict with a team member or stakeholder. How did you resolve it?`,
-            type: type,
-            topic: type === 'technical' ? 'System Design' : 'Teamwork',
-            expectedPoints: type === 'technical' 
-              ? ['Database choices', 'API design', 'Scaling strategies']
-              : ['Situation', 'Conflict resolution', 'Action taken', 'Result'],
-            expectedDuration: '5 mins'
-          });
-        }
-      }
-    }
+    const questions = await generateInterviewQuestions({
+      role,
+      difficulty,
+      numQuestions,
+      mode,
+      resumeJSON: resumeJSON || null,
+    });
 
     // Save session to Firestore
     const sessionData = {
@@ -134,13 +138,14 @@ router.post('/start', verifyToken, async (req, res) => {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
 
-    await db.collection('sessions').doc(sessionId).set(sessionData);
+    await getDb().collection('sessions').doc(sessionId).set(sessionData);
 
     res.json({ sessionId, questions, role, difficulty, mode });
   } catch (error) {
     console.error('Error starting interview:', error);
-    res.status(500).json({ 
-      error: 'Failed to generate interview questions.', 
+    const status = error.message?.includes('Firebase Admin is not initialized') ? 503 : 500;
+    res.status(status).json({ 
+      error: status === 503 ? 'Server configuration error' : 'Failed to generate interview questions.', 
       details: error.message,
       code: error.code || 'UNKNOWN_ERROR'
     });
@@ -203,7 +208,7 @@ router.post('/evaluate', verifyToken, async (req, res) => {
 
     // Update session in Firestore
     if (sessionId) {
-      const sessionRef = db.collection('sessions').doc(sessionId);
+      const sessionRef = getDb().collection('sessions').doc(sessionId);
       await sessionRef.update({
         answers: admin.firestore.FieldValue.arrayUnion({
           questionId,
@@ -232,7 +237,7 @@ router.post('/complete', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Session ID is required.' });
     }
 
-    const sessionRef = db.collection('sessions').doc(sessionId);
+    const sessionRef = getDb().collection('sessions').doc(sessionId);
     const sessionDoc = await sessionRef.get();
 
     if (!sessionDoc.exists) {

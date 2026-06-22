@@ -1,15 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const admin = require('firebase-admin');
 const { verifyToken } = require('../middleware/auth');
-
-const db = admin.firestore();
+const { getDb } = require('../db');
 
 // ─── GET /api/sessions ────────────────────────────────────────────────────────
 // Returns all sessions for the logged-in user
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const snapshot = await db
+    const snapshot = await getDb()
       .collection('sessions')
       .where('userId', '==', req.user.uid)
       .get();
@@ -52,7 +50,7 @@ router.get('/', verifyToken, async (req, res) => {
 // Returns full details of a single session
 router.get('/:id', verifyToken, async (req, res) => {
   try {
-    const sessionDoc = await db.collection('sessions').doc(req.params.id).get();
+    const sessionDoc = await getDb().collection('sessions').doc(req.params.id).get();
 
     if (!sessionDoc.exists) {
       return res.status(404).json({ error: 'Session not found.' });
@@ -74,7 +72,7 @@ router.get('/:id', verifyToken, async (req, res) => {
 // ─── DELETE /api/sessions/:id ─────────────────────────────────────────────────
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
-    const sessionRef = db.collection('sessions').doc(req.params.id);
+    const sessionRef = getDb().collection('sessions').doc(req.params.id);
     const sessionDoc = await sessionRef.get();
 
     if (!sessionDoc.exists) {
@@ -97,7 +95,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
 // Returns stats for the dashboard
 router.get('/stats/summary', verifyToken, async (req, res) => {
   try {
-    const snapshot = await db
+    const snapshot = await getDb()
       .collection('sessions')
       .where('userId', '==', req.user.uid)
       .get();

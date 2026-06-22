@@ -5,6 +5,13 @@ const admin = require('firebase-admin');
  * Attaches decoded user info to req.user.
  */
 async function verifyToken(req, res, next) {
+  if (!admin.apps.length) {
+    return res.status(503).json({
+      error: 'Server configuration error',
+      details: 'Firebase Admin is not initialized. Check FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY on Vercel.',
+    });
+  }
+
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {

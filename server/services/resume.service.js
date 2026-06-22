@@ -1,4 +1,5 @@
-const pdfParse = require('pdf-parse');
+// Direct import avoids Vercel serverless issues with pdf-parse debug/test file loading
+const pdfParse = require('pdf-parse/lib/pdf-parse.js');
 const { generateJSON } = require('./gemini.service');
 
 /**

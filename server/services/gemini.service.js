@@ -1,13 +1,19 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = ai.getGenerativeModel({ model: "gemini-2.5-flash" });
+function getGeminiClient() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is not configured. Add it in your Vercel project environment variables.');
+  }
+  return new GoogleGenerativeAI(apiKey);
+}
 
 /**
  * Helper to call Gemini and parse strict JSON response
  */
 async function generateJSON(prompt) {
   try {
+    const ai = getGeminiClient();
     const jsonModel = ai.getGenerativeModel({ 
       model: "gemini-2.5-flash",
       generationConfig: { responseMimeType: "application/json" }

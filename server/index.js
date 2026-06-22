@@ -6,26 +6,36 @@ const rateLimit = require('express-rate-limit');
 const admin = require('firebase-admin');
 
 // ─── Firebase Admin Initialization ───────────────────────────────────────────
-if (!admin.apps.length) {
+function initFirebaseAdmin() {
+  if (admin.apps.length) return;
+
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   let privateKey = process.env.FIREBASE_PRIVATE_KEY;
-  if (privateKey) {
-    privateKey = privateKey.trim();
-    // Strip leading/trailing double or single quotes if present
-    privateKey = privateKey.replace(/^["']|["']$/g, '');
-    // Replace literal '\n' character sequences with actual newlines
-    privateKey = privateKey.replace(/\\n/g, '\n');
-    // Remove carriage returns to avoid parsing issues
-    privateKey = privateKey.replace(/\r/g, '');
+
+  if (!projectId || !clientEmail || !privateKey) {
+    console.error(
+      'Missing Firebase credentials. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY in Vercel environment variables.'
+    );
+    return;
   }
 
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: privateKey,
-    }),
-  });
+  privateKey = privateKey.trim().replace(/^["']|["']$/g, '').replace(/\\n/g, '\n').replace(/\r/g, '');
+
+  try {
+    admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId,
+        clientEmail,
+        privateKey,
+      }),
+    });
+  } catch (error) {
+    console.error('Firebase Admin initialization failed:', error.message);
+  }
 }
+
+initFirebaseAdmin();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -59,9 +69,14 @@ const path = require('path');
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
+  const firebaseReady = admin.apps.length > 0;
+  const geminiReady = Boolean(process.env.GEMINI_API_KEY);
+
   res.json({
-    status: 'OK',
+    status: firebaseReady && geminiReady ? 'OK' : 'DEGRADED',
     message: 'AI Interview Server is running!',
+    firebase: firebaseReady,
+    gemini: geminiReady,
     timestamp: new Date().toISOString(),
   });
 });
@@ -92,7 +107,8 @@ app.use((err, req, res, next) => {
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+// Only listen when running locally — Vercel uses the exported app as a serverless function
+if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`\n🚀  Server running on http://localhost:${PORT}`);
     console.log(`🤖  AI Interview Practice System ready!\n`);
